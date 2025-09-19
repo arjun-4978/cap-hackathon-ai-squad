@@ -17,14 +17,27 @@ logger = logging.getLogger(__name__)
 app = BedrockAgentCoreApp()
 
 # --------------------------
-# AI Agent: BRD Generator
+# AI Agents
 # --------------------------
+extractor_agent = Agent(
+    model="anthropic.claude-3-sonnet-20240229-v1:0",
+    system_prompt="""
+    Extract brand and feature from user query. Look for:
+    - Brand names (like Test_Brand, Brand_Name, etc.)
+    - Feature names (like promotions, loyalty, rewards, etc.)
+    - Match against available options when provided
+    
+    Return JSON only: {"brand": "exact_brand_name", "feature": "exact_feature_name"}
+    If unclear, return {"brand": null, "feature": null}
+    """
+)
+
 brd_agent = Agent(
     model="anthropic.claude-3-sonnet-20240229-v1:0",
     system_prompt="""
     You are a Business Analyst AI. 
     Your task is to generate a clear and detailed Business Requirement Document (BRD)
-    based on the provided JSON feature input. 
+    based on the provided JSON/MD feature input. 
     Provide the output as markdown. Do not include greetings.
     """
 )
@@ -59,18 +72,87 @@ def write_s3_file(bucket: str, key: str, content: str):
         ContentType="text/markdown"
     )
 
+def list_brands(bucket: str):
+    try:
+        response = s3_client.list_objects_v2(Bucket=bucket, Delimiter='/')
+        return [prefix['Prefix'].rstrip('/') for prefix in response.get('CommonPrefixes', [])]
+    except:
+        return []
+
+def list_features(bucket: str, brand: str):
+    try:
+        prefix = f"{brand}/Feature/input/"
+        response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter='/')
+        return [prefix['Prefix'].split('/')[-2] for prefix in response.get('CommonPrefixes', [])]
+    except:
+        return []
+
 # --------------------------
 # Entrypoint
 # --------------------------
 @app.entrypoint
 def invoke(payload):
-    bucket = payload.get("bucket")
+    bucket = payload.get("bucket", "ai-solution-squad")
+    query = payload.get("query")
     brand = payload.get("brand")
     feature = payload.get("feature")
 
-    if not bucket or not brand or not feature:
-        return {"error": "Please provide 'bucket', 'brand', and 'feature' in the payload."}
+    # Handle natural language query
+    if query and not (brand and feature):
+        # 1. Extract all brands and features from S3
+        brands = list_brands(bucket)
+        all_features = set()
+        features_by_brand = {}
+        
+        for b in brands:
+            brand_features = list_features(bucket, b)
+            features_by_brand[b] = brand_features
+            all_features.update(brand_features)
+        
+        all_features = list(all_features)
+        
+        # 2. Find best matching brand and feature
+        extract_prompt = f"""
+        User query: "{query}"
+        
+        Available brands: {brands}
+        Available features: {all_features}
+        Features by brand: {features_by_brand}
+        
+        Find the MOST MATCHING brand name first, then the MOST MATCHING feature name.
+        Return JSON: {{"brand": "best_match_brand", "feature": "best_match_feature"}}
+        """
+        
+        result = extractor_agent(extract_prompt)
+        try:
+            if hasattr(result, 'content') and result.content:
+                extracted = json.loads(result.content[0].text)
+            else:
+                extracted = json.loads(str(result))
+            brand = brand or extracted.get("brand")
+            feature = feature or extracted.get("feature")
+        except:
+            logger.error(f"Failed to parse extraction result: {result}")
+    
+    # List available options if missing parameters
+    if not brand or not feature:
+        if 'brands' not in locals():
+            brands = list_brands(bucket)
+            features_by_brand = {b: list_features(bucket, b) for b in brands}
+        
+        missing = []
+        if not brand: missing.append("Brand")
+        if not feature: missing.append("Feature")
+        
+        return {
+            "error": f"{' or '.join(missing)} is not understood from Prompt",
+            "available_brands": brands,
+            "available_features": features_by_brand,
+            "query_received": query
+        }
 
+    logger.info(f"Processing: bucket={bucket}, brand={brand}, feature={feature}")
+    
     # 1️⃣ List input files
     input_prefix = f"{brand}/Feature/input/{feature}/"
     input_files = list_s3_files(bucket, input_prefix)
@@ -94,14 +176,21 @@ def invoke(payload):
 
     # 3️⃣ Build prompt for BRD agent
     brd_prompt = f"""
-Create BRD document from below contents remove unwanted contents while gnerating BRD      
-{json.dumps(combined_input, indent=2)}
-Provide the output as markdown.
+ Generate a comprehensive Business Requirements Document (BRD) for a new feature.
+
+The BRD must be created by analyzing and synthesizing the following content:
+
+1.  {json.dumps(combined_input, indent=2)} Combine the content from all provided JSON and Markdown files. These files contain specific feature requirements, technical specifications, and user stories.
+2.  Extract and integrate relevant business and functional requirements from the following web pages:
+    -   `https://info.kognitivloyalty.com/Promotions.html`
+    -   `https://info.kognitivloyalty.com/Segment_Group.html`
+
+The BRD must be a single, well-structured Markdown document. Ensure the final output is a clean, professional, and well-organized document ready for business and technical stakeholders. Avoid including any raw or unprocessed data dumps from the source files or URLs.
+
 """
 
-    # Log the final message being sent to the LLM
-    logger.info("Final prompt/message sent to the LLM for BRD generation:")
-    logger.info(brd_prompt)
+    # Generate BRD (prompt logged separately if needed)
+    logger.info("Generating BRD with LLM...")
 
     # 4️⃣ Generate BRD
     brd_result = brd_agent(brd_prompt)

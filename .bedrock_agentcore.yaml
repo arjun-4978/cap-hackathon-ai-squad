@@ -21,7 +21,7 @@ agents:
     bedrock_agentcore:
       agent_id: ai_solution_squad_feature_brd-sM30KQ7Noj
       agent_arn: arn:aws:bedrock-agentcore:us-east-1:582821021539:runtime/ai_solution_squad_feature_brd-sM30KQ7Noj
-      agent_session_id: f21f479d-52f4-475e-a1f0-707fc4f5a91f
+      agent_session_id: 4619f648-5769-43df-b329-dcbc41914b12
     codebuild:
       project_name: bedrock-agentcore-ai_solution_squad_feature_brd-builder
       execution_role: arn:aws:iam::582821021539:role/AmazonBedrockAgentCoreSDKCodeBuild-us-east-1-7e31c25e98
