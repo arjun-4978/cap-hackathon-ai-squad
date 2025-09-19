@@ -1,0 +1,30 @@
+default_agent: ai_solution_squad_feature_brd
+agents:
+  ai_solution_squad_feature_brd:
+    name: ai_solution_squad_feature_brd
+    entrypoint: ai_solution_squad_feature_brd.py
+    platform: linux/arm64
+    container_runtime: none
+    aws:
+      execution_role: arn:aws:iam::582821021539:role/AmazonBedrockAgentCoreRuntime
+      execution_role_auto_create: true
+      account: '582821021539'
+      region: us-east-1
+      ecr_repository: 582821021539.dkr.ecr.us-east-1.amazonaws.com/bedrock-agentcore-ai_solution_squad_feature_brd
+      ecr_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+      protocol_configuration:
+        server_protocol: HTTP
+      observability:
+        enabled: true
+    bedrock_agentcore:
+      agent_id: ai_solution_squad_feature_brd-sM30KQ7Noj
+      agent_arn: arn:aws:bedrock-agentcore:us-east-1:582821021539:runtime/ai_solution_squad_feature_brd-sM30KQ7Noj
+      agent_session_id: f21f479d-52f4-475e-a1f0-707fc4f5a91f
+    codebuild:
+      project_name: bedrock-agentcore-ai_solution_squad_feature_brd-builder
+      execution_role: arn:aws:iam::582821021539:role/AmazonBedrockAgentCoreSDKCodeBuild-us-east-1-7e31c25e98
+      source_bucket: bedrock-agentcore-codebuild-sources-582821021539-us-east-1
+    authorizer_configuration: null
+    oauth_configuration: null
